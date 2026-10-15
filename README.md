@@ -8,12 +8,12 @@
 
 ## 模型
 
-权重为 Dailv 1.5（GGUF F16，约 3.1 GB）：
+权重在 Hugging Face（GGUF F16，约 3.1 GB）：
 
-https://huggingface.co/k86574/Dailv1.5
+https://huggingface.co/k86574/Drop-AIGC
 
 ```bash
-hf download k86574/Dailv1.5 Dailv1.5-f16.gguf --local-dir models
+hf download k86574/Drop-AIGC Dailv1.5-f16.gguf --local-dir models
 ```
 
 下载后的文件应位于 `models/Dailv1.5-f16.gguf`。放在其他位置时，将 `DAILV15_MODEL` 设为完整路径。
