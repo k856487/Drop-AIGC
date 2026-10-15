@@ -21,6 +21,8 @@
     html, body { margin: 0; height: 100%; }
     body {
       min-height: 100%;
+      display: grid;
+      overflow: auto;
       color: var(--ink);
       background:
         radial-gradient(1200px 500px at 10% -10%, #f7f1e6 0%, transparent 55%),
@@ -28,9 +30,11 @@
       font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
     }
     .wrap {
-      max-width: 1080px;
-      margin: 0 auto;
-      padding: 28px 20px 40px;
+      width: min(1360px, calc(100% - 96px));
+      margin: auto;
+      padding: 32px 0;
+      display: flex;
+      flex-direction: column;
     }
     header {
       display: flex;
@@ -38,6 +42,7 @@
       justify-content: space-between;
       gap: 16px;
       margin-bottom: 18px;
+      flex: none;
     }
     h1 {
       margin: 0;
@@ -53,16 +58,18 @@
       font-size: 13px;
     }
     .grid {
+      height: clamp(440px, calc(100vh - 280px), 680px);
+      min-height: 0;
       display: grid;
       grid-template-columns: 1fr 1fr;
-      gap: 16px;
+      gap: 18px;
     }
     .card {
       background: var(--paper);
       border: 1px solid var(--line);
       border-radius: 16px;
       box-shadow: var(--shadow);
-      min-height: 460px;
+      min-height: 0;
       display: flex;
       flex-direction: column;
     }
@@ -77,9 +84,11 @@
     }
     textarea, .out {
       flex: 1;
+      min-height: 0;
       margin: 8px 14px 14px;
       border: 0;
       resize: none;
+      overflow: auto;
       background: transparent;
       color: var(--ink);
       font-family: "Palatino Linotype", "Songti SC", "Noto Serif SC", serif;
@@ -88,10 +97,7 @@
       outline: none;
     }
     textarea::placeholder { color: #b3a89b; }
-    .out {
-      white-space: pre-wrap;
-      overflow: auto;
-    }
+    .out { white-space: pre-wrap; }
     .out.empty { color: #b3a89b; }
     #think {
       display: block;
@@ -107,6 +113,7 @@
       align-items: center;
       gap: 10px;
       margin-top: 14px;
+      flex: none;
     }
     button {
       border: 0;
@@ -153,10 +160,25 @@
       margin-top: 16px;
       color: var(--muted);
       font-size: 12px;
+      flex: none;
     }
     @media (max-width: 800px) {
-      .grid { grid-template-columns: 1fr; }
+      body { overflow: hidden; }
+      .wrap {
+        width: 100%;
+        height: 100%;
+        margin: 0;
+        padding: 16px 14px 12px;
+        min-height: 0;
+      }
+      .grid {
+        flex: 1;
+        height: auto;
+        grid-template-columns: 1fr;
+        grid-template-rows: 1fr 1fr;
+      }
       header { align-items: flex-start; flex-direction: column; }
+      h1 { font-size: 26px; }
       .hint { display: none; }
     }
   </style>
@@ -167,6 +189,7 @@
       <div>
         <h1>Drop AIGC</h1>
         <p class="sub">降低中文文本的 AI 率。目前只支持中文。</p>
+      </div>
     </header>
     <div class="grid">
       <section class="card">
