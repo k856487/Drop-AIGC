@@ -356,6 +356,7 @@ PROFILES: dict[str, Profile] = {
             "你是中文学术论文降AI率改写助手。"
             "只改写用户给出的这一句话：用更自然、克制的学术表述重述原意；"
             "保留术语与论点，不编造事实，不扩展成多句长论述，不添加原文没有的例子或对策。"
+            "改写长度宜与原文接近（约0.7～1.2倍），勿显著扩写。"
             "只输出改写后的这一句正文，不要解释、不要序号。"
         ),
         temperature=float(_env("DAILV15_TEMP", "0.7")),
@@ -1733,6 +1734,11 @@ def _rewrite_max_tokens(n_chars: int, *, mode: str = "normal") -> int:
     return min(640, max(80, int(n * 1.5) + 16))
 
 
+def _page_cancelled() -> bool:
+    flag = globals().get("_PAGE_CANCEL")
+    return bool(flag is not None and flag.is_set())
+
+
 def _produce_server(
     cmd: list[str],
     q: queue.Queue,
@@ -1790,7 +1796,20 @@ def _produce_server(
     pending = ""
     try:
         with opener.open(req, timeout=180) as resp:
+            def _watch_cancel() -> None:
+                flag = globals().get("_PAGE_CANCEL")
+                if flag is None or not flag.wait(180):
+                    return
+                try:
+                    resp.close()
+                except Exception:
+                    pass
+
+            threading.Thread(target=_watch_cancel, daemon=True).start()
             while True:
+                if _page_cancelled():
+                    result.update(rc=3, err="")
+                    return
                 raw = resp.read(512)
                 if not raw:
                     break
@@ -1836,10 +1855,16 @@ def _produce_server(
                             if piece:
                                 _enqueue(q, piece.replace("\r", ""), collected)
     except urllib.error.HTTPError as e:
-        detail = e.read().decode("utf-8", "replace")[:500]
-        result.update(rc=1, err=f"server HTTP {e.code}: {detail}")
+        if _page_cancelled():
+            result.update(rc=3, err="")
+        else:
+            detail = e.read().decode("utf-8", "replace")[:500]
+            result.update(rc=1, err=f"server HTTP {e.code}: {detail}")
     except Exception as e:
-        result.update(rc=1, err=f"server 请求失败: {e}")
+        if _page_cancelled():
+            result.update(rc=3, err="")
+        else:
+            result.update(rc=1, err=f"server 请求失败: {e}")
     finally:
         q.put(_DONE)
 
@@ -1875,6 +1900,10 @@ def _produce_llama(
 
     try:
         while True:
+            if _page_cancelled():
+                proc.kill()
+                result.update(rc=3, err="")
+                break
             b = proc.stdout.read(1)
             if not b:
                 break
@@ -1956,7 +1985,18 @@ def _produce_llama(
                 err_chunks.append(proc.stderr.read() or b"")
         except Exception:
             pass
-        result["rc"] = proc.wait()
+        if result.get("rc") == 3:
+            try:
+                proc.kill()
+            except OSError:
+                pass
+            try:
+                proc.wait(timeout=2)
+            except Exception:
+                pass
+            result["rc"] = 3
+        else:
+            result["rc"] = proc.wait()
         result["stderr"] = b"".join(err_chunks).decode("utf-8", "replace")
         q.put(_DONE)
 
@@ -2024,6 +2064,8 @@ def stream_rewrite(
 
     rc = int(result.get("rc", 1))
     err_text = result.get("stderr") or ""
+    if rc == 3:
+        return 3, strip_llama_prompt_echo("".join(collected))
     if rc != 0:
         if "OutOfDeviceMemory" in err_text or "failed to allocate" in err_text.lower():
             print(
@@ -2311,15 +2353,18 @@ def main(argv: list[str] | None = None) -> int:
 
     def rewrite_unit(chunk: str, suffix: str, is_last: bool) -> tuple[int, str]:
         """Generate one chunk fully. Display is handled by the pipeline."""
+        if _page_cancelled():
+            return 3, ""
         end = "\n" if is_last else (suffix or "")
         src = _gate_src(chunk)
         ai_before = _ai_prob(src) if _DROP_RANK else None
         list_mode = _is_list_template(src)
         short_lim = int(os.environ.get("DAILV_SHORT_CHARS", "160"))
         short_mode = len(src) <= short_lim
-        # Short paras: rewrite plain text (no protect fragments). Fragment path
-        # was the main 101/103 runaway — each shard inherited full-para max_tokens.
-        gen_in = src if short_mode else chunk
+        # 短段默认不走片段拼接（那条路曾经把整段 token 预算套到每个碎片上）。
+        # 句中若有书名、引号、数字或中文数字，仍用占位符原文，避免保护被短段旁路拆掉。
+        has_protect = bool(bag and placeholder_ids(chunk))
+        gen_in = chunk if has_protect or not short_mode else src
         unit_sys = sys_prompt
         if list_mode:
             unit_sys += _LIST_REWRITE_HINT
@@ -2375,6 +2420,8 @@ def main(argv: list[str] | None = None) -> int:
                 system_prompt=unit_sys,
                 max_tokens=bon_max_tok,
             )
+            if rc == 3 or _page_cancelled():
+                return 3, ""
             if rc != 0:
                 if not cands:
                     return rc, ""
@@ -2818,6 +2865,42 @@ def main(argv: list[str] | None = None) -> int:
                         print("提示: 低srcAI改写抬升，回退原文\n", file=sys.stderr)
                     body = src
 
+        # Drop AIGC：只卡字数范围。超出则重写，最多 3 次，仍超出才用原文。
+        if os.environ.get("DAILV_LEN_GATE") == "1" and body and src.strip():
+            def _in_len_band(text: str) -> bool:
+                ratio = len(text) / max(len(src), 1)
+                return _GATE_LEN_LO <= ratio <= _GATE_LEN_HI
+
+            if not _in_len_band(body):
+                hint = (
+                    unit_sys
+                    + "\n【强制】上一稿长度不合格。"
+                    f"请改到大约{len(src)}字，必须落在原文的{_GATE_LEN_LO:.1f}～{_GATE_LEN_HI:.1f}倍。"
+                    "不要扩写，不要添加原文没有的内容。只输出正文。"
+                )
+                for _attempt in range(3):
+                    rc_c, body_c = _gen_once(
+                        gen_in,
+                        temperature=_GATE_TEMP,
+                        system_prompt=hint,
+                        max_tokens=compress_max_tok,
+                    )
+                    if rc_c == 3 or _page_cancelled():
+                        return 3, ""
+                    if rc_c != 0 or not body_c.strip():
+                        continue
+                    body_c = _polish_fluency(body_c)
+                    if _in_len_band(body_c):
+                        body = body_c
+                        break
+                if not _in_len_band(body):
+                    if not cfg.quiet_progress:
+                        print(
+                            f"提示: 字数重写 3 次仍超出 {_GATE_LEN_LO:.1f}～{_GATE_LEN_HI:.1f}，本句回退原文\n",
+                            file=sys.stderr,
+                        )
+                    body = src
+
         return 0, body + end
 
     # 生成与展示重叠：打第 i 段时 GPU 已在写第 i+1 段。
@@ -2828,6 +2911,9 @@ def main(argv: list[str] | None = None) -> int:
         try:
             for i, (chunk, suffix) in enumerate(units):
                 rc, text = rewrite_unit(chunk, suffix, i == len(units) - 1)
+                if rc == 3:
+                    ready.put(("done",))
+                    return
                 if rc != 0:
                     ready.put(("err", rc, i))
                     return

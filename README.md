@@ -4,6 +4,8 @@
 
 目前只支持中文。
 
+![Drop AIGC 页面](docs/preview.png)
+
 ## 模型
 
 权重为 Dailv 1.5（GGUF F16，约 3.1 GB）：
@@ -24,8 +26,7 @@ hf download k86574/Dailv1.5 Dailv1.5-f16.gguf --local-dir models
 | Python | 3.10 及以上 |
 | 推理 | [llama.cpp](https://github.com/ggml-org/llama.cpp) 的 `llama-cli`。已有 `llama-server` 时可复用，见下方 |
 | 显卡 | 可选。有显卡时由 llama.cpp 自行选择设备 |
-| 磁盘 | 模型约 3.1 GB，另需检测器缓存 |
-| 检测器 | 选优使用 `yuchuantian/AIGC_detector_zhv3`，首次运行时自动下载 |
+| 磁盘 | 模型约 3.1 GB |
 
 ```bash
 python -m venv .venv
@@ -42,7 +43,7 @@ app/server.py      页面服务
 app/index.html     页面
 app/dailv.py       改写实现
 models/            放置 Dailv1.5-f16.gguf
-requirements.txt   检测器依赖
+requirements.txt   运行依赖
 ```
 
 ## 启动

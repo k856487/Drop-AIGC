@@ -120,6 +120,23 @@
       background: var(--accent);
       color: var(--accent-ink);
     }
+    #go.pause {
+      width: 42px;
+      height: 42px;
+      padding: 0;
+      background: var(--paper);
+      border: 1px solid var(--line);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+    }
+    #go.pause i {
+      width: 13px;
+      height: 13px;
+      background: #111;
+      border-radius: 2px;
+      display: block;
+    }
     #copy, #clear {
       background: transparent;
       color: var(--ink);
@@ -191,6 +208,17 @@
     let streamDone = false;
     let pumpWait = null;
     let pumpTask = null;
+    let runCtrl = null;
+
+    function setPause(on) {
+      go.classList.toggle("pause", on);
+      go.innerHTML = on ? "<i></i>" : "改写";
+      go.setAttribute("aria-label", on ? "暂停" : "改写");
+    }
+    function stopRewrite() {
+      fetch("/api/stop", { method: "POST" }).catch(() => {});
+      if (runCtrl) runCtrl.abort();
+    }
 
     function chars(s) { return [...s.replace(/\s/g, "")].length; }
     function showError(msg) {
@@ -289,7 +317,8 @@
         return;
       }
       showError("");
-      go.disabled = true;
+      setPause(true);
+      runCtrl = new AbortController();
       segQueue = [];
       streamDone = false;
       typing = false;
@@ -308,7 +337,8 @@
         const r = await fetch("/api/rewrite", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ text })
+          body: JSON.stringify({ text }),
+          signal: runCtrl.signal
         });
         if (!r.ok || !r.body) {
           let msg = "改写失败";
@@ -339,21 +369,30 @@
           }
         }
       } catch (e) {
-        failed = true;
-        showError(e.message || String(e));
+        if (e.name !== "AbortError") {
+          failed = true;
+          showError(e.message || String(e));
+        }
       } finally {
         streamDone = true;
         wakePump();
         await task;
         if (typed.textContent) resultText = typed.textContent;
-        else if (failed) setOut(PLACEHOLDER, true);
+        else setOut(PLACEHOLDER, true);
         clearInterval(timer);
-        go.disabled = false;
+        setPause(false);
+        runCtrl = null;
         hint.textContent = "Ctrl + Enter 开始";
         refreshStatus();
       }
     }
-    go.addEventListener("click", rewrite);
+    go.addEventListener("click", () => {
+      if (go.classList.contains("pause")) {
+        stopRewrite();
+        return;
+      }
+      rewrite();
+    });
     document.getElementById("copy").addEventListener("click", async () => {
       if (!resultText) return;
       await navigator.clipboard.writeText(resultText);
@@ -371,10 +410,11 @@
       src.focus();
     });
     src.addEventListener("keydown", (e) => {
-      if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
-        e.preventDefault();
-        rewrite();
-      }
+        if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+          e.preventDefault();
+          if (go.classList.contains("pause")) stopRewrite();
+          else rewrite();
+        }
     });
     refreshStatus();
   </script>

@@ -13,12 +13,16 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse
 
-os.environ.setdefault("DAILV_BON_N", "8")
-os.environ.setdefault("DAILV_PROBE_REINJECT", "1")
-os.environ.setdefault("DAILV_AGGRESSIVE_RETRY", "1")
-os.environ.setdefault("DAILV_DROP_RANK", "1")
-os.environ.setdefault("DAILV_AGGRESSIVE_DROP_FLOOR", "0.20")
-os.environ.setdefault("DAILV_FALLBACK_SEVERE", "1")
+# 页面直接出字：不跑阀门、检测器选优、探针回填和多稿重试。
+os.environ["DAILV_NO_GATE"] = "1"
+os.environ["DAILV_BON_N"] = "1"
+os.environ["DAILV_PROBE_REINJECT"] = "0"
+os.environ["DAILV_AGGRESSIVE_RETRY"] = "0"
+os.environ["DAILV_DROP_RANK"] = "0"
+os.environ["DAILV_FALLBACK_SEVERE"] = "0"
+os.environ["DAILV_LEN_GATE"] = "1"
+os.environ["DAILV_GATE_LEN_LO"] = "0.7"
+os.environ["DAILV_GATE_LEN_HI"] = "1.2"
 
 HOST = os.environ.get("DAILV_WEB_HOST", "127.0.0.1")
 PORT = int(os.environ.get("DAILV_WEB_PORT", "8780"))
@@ -52,11 +56,20 @@ dailv = _load_dailv()
 _BASE_15 = dailv.PROFILES["1.5b"]
 
 
+def _arm_cancel() -> None:
+    cancel = getattr(dailv, "_PAGE_CANCEL", None)
+    if cancel is None:
+        dailv._PAGE_CANCEL = threading.Event()
+    else:
+        cancel.clear()
+
+
 def stream_rewrite(text: str, emit) -> None:
     """改写一段。每完成一句就先发给页面。"""
     import queue as queue_mod
 
     events: queue_mod.Queue = queue_mod.Queue()
+    _arm_cancel()
     argv = ["--profile", "1.5b", "--quiet-progress", text]
     original_pace = dailv._pace_out
 
@@ -93,6 +106,9 @@ def stream_rewrite(text: str, emit) -> None:
                 emit({"type": "segment", "text": rest[0]})
                 continue
             rc, tail = rest
+            if getattr(dailv, "_PAGE_CANCEL", None) is not None and dailv._PAGE_CANCEL.is_set():
+                emit({"type": "done", "text": "".join(parts).strip(), "warning": ""})
+                return
             if rc != 0 and not parts:
                 raise RuntimeError(tail or f"dailv 退出码 {rc}")
             if not parts:
@@ -164,6 +180,12 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:
         global _busy
         path = urlparse(self.path).path
+        if path == "/api/stop":
+            flag = getattr(dailv, "_PAGE_CANCEL", None)
+            if flag is not None:
+                flag.set()
+            self._json(200, {"ok": True})
+            return
         if path != "/api/rewrite":
             self._json(404, {"ok": False, "error": "not found"})
             return
@@ -209,7 +231,7 @@ def main() -> None:
     httpd = ThreadingHTTPServer((HOST, PORT), Handler)
     info = status()
     print(f"Drop AIGC  http://{HOST}:{PORT}", flush=True)
-    print(f"model={info['model']}  BoN={info['bon']}", flush=True)
+    print(f"model={info['model']}", flush=True)
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
