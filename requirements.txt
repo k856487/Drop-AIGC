@@ -1,0 +1,4 @@
+# 页面服务只用 Python 标准库。下面三件是按 AI 率选优时的检测器依赖。
+torch>=2.2
+transformers>=4.46
+huggingface_hub>=0.26

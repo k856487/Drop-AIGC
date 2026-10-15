@@ -1,0 +1,382 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Drop AIGC</title>
+  <style>
+    :root {
+      --bg: #efe8dc;
+      --paper: #fbf7f0;
+      --ink: #1d1a16;
+      --muted: #6e655c;
+      --line: #ddd3c4;
+      --accent: #8d3b2f;
+      --accent-ink: #fffaf6;
+      --ok: #1f5c45;
+      --warn: #8a5a12;
+      --shadow: 0 18px 50px rgba(60, 40, 20, 0.08);
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; height: 100%; }
+    body {
+      min-height: 100%;
+      color: var(--ink);
+      background:
+        radial-gradient(1200px 500px at 10% -10%, #f7f1e6 0%, transparent 55%),
+        var(--bg);
+      font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    }
+    .wrap {
+      max-width: 1080px;
+      margin: 0 auto;
+      padding: 28px 20px 40px;
+    }
+    header {
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 18px;
+    }
+    h1 {
+      margin: 0;
+      font-family: "Palatino Linotype", "Songti SC", "Noto Serif SC", serif;
+      font-weight: 600;
+      font-size: 32px;
+      letter-spacing: 0.04em;
+    }
+    h1 span { color: var(--accent); }
+    .sub {
+      margin: 6px 0 0;
+      color: var(--muted);
+      font-size: 13px;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+    }
+    .card {
+      background: var(--paper);
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      box-shadow: var(--shadow);
+      min-height: 460px;
+      display: flex;
+      flex-direction: column;
+    }
+    .card head, .bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px 14px 0;
+      color: var(--muted);
+      font-size: 12px;
+      letter-spacing: 0.08em;
+    }
+    textarea, .out {
+      flex: 1;
+      margin: 8px 14px 14px;
+      border: 0;
+      resize: none;
+      background: transparent;
+      color: var(--ink);
+      font-family: "Palatino Linotype", "Songti SC", "Noto Serif SC", serif;
+      font-size: 17px;
+      line-height: 1.75;
+      outline: none;
+    }
+    textarea::placeholder { color: #b3a89b; }
+    .out {
+      white-space: pre-wrap;
+      overflow: auto;
+    }
+    .out.empty { color: #b3a89b; }
+    #think {
+      display: block;
+      margin-top: 0.65em;
+      color: var(--muted);
+      font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+      font-size: 14px;
+      letter-spacing: 0.04em;
+    }
+    #think[hidden] { display: none; }
+    .actions {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-top: 14px;
+    }
+    button {
+      border: 0;
+      border-radius: 999px;
+      padding: 10px 18px;
+      font-size: 14px;
+      cursor: pointer;
+    }
+    button:disabled { opacity: 0.55; cursor: wait; }
+    #go {
+      background: var(--accent);
+      color: var(--accent-ink);
+    }
+    #copy, #clear {
+      background: transparent;
+      color: var(--ink);
+      border: 1px solid var(--line);
+    }
+    .hint { margin-left: auto; color: var(--muted); font-size: 12px; }
+    .err {
+      display: none;
+      margin-top: 12px;
+      color: var(--accent);
+      font-size: 13px;
+    }
+    footer {
+      margin-top: 16px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+    @media (max-width: 800px) {
+      .grid { grid-template-columns: 1fr; }
+      header { align-items: flex-start; flex-direction: column; }
+      .hint { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <div>
+        <h1>Drop AIGC</h1>
+        <p class="sub">降低中文文本的 AI 率。目前只支持中文。</p>
+    </header>
+    <div class="grid">
+      <section class="card">
+        <div class="bar"><span>原文</span><span id="srcCount">0 字</span></div>
+        <textarea id="src" placeholder="贴上待改写段落。长文会按句子切开，改完再按原结构拼回。"></textarea>
+      </section>
+      <section class="card">
+        <div class="bar"><span>改写</span><span id="outCount">0 字</span></div>
+        <div class="out empty" id="out"><span id="typed">改写结果会显示在这里。</span><span id="think" hidden>思考中</span></div>
+      </section>
+    </div>
+    <div class="actions">
+      <button id="go" type="button">改写</button>
+      <button id="copy" type="button">复制结果</button>
+      <button id="clear" type="button">清空</button>
+      <div class="hint" id="hint">Ctrl + Enter 开始</div>
+    </div>
+    <div class="err" id="err"></div>
+    <footer id="foot">加载配方…</footer>
+  </div>
+  <script>
+    const src = document.getElementById("src");
+    const out = document.getElementById("out");
+    const go = document.getElementById("go");
+    const err = document.getElementById("err");
+    const foot = document.getElementById("foot");
+    const srcCount = document.getElementById("srcCount");
+    const outCount = document.getElementById("outCount");
+    const hint = document.getElementById("hint");
+    const typed = document.getElementById("typed");
+    const think = document.getElementById("think");
+    const PLACEHOLDER = "改写结果会显示在这里。";
+    const CHAR_MS = 18;
+    let resultText = "";
+    let timer = null;
+    let thinkTimer = null;
+    let segQueue = [];
+    let typing = false;
+    let streamDone = false;
+    let pumpWait = null;
+    let pumpTask = null;
+
+    function chars(s) { return [...s.replace(/\s/g, "")].length; }
+    function showError(msg) {
+      err.style.display = msg ? "block" : "none";
+      err.textContent = msg || "";
+    }
+    src.addEventListener("input", () => {
+      srcCount.textContent = chars(src.value) + " 字";
+    });
+    function setOut(text, placeholder) {
+      resultText = placeholder ? "" : text;
+      typed.textContent = text;
+      think.hidden = true;
+      stopThink();
+      out.classList.toggle("empty", !!placeholder);
+      outCount.textContent = (placeholder ? 0 : chars(text)) + " 字";
+      out.scrollTop = out.scrollHeight;
+    }
+    function stopThink() {
+      if (thinkTimer) clearInterval(thinkTimer);
+      thinkTimer = null;
+    }
+    function showThink(on) {
+      think.hidden = !on;
+      stopThink();
+      if (!on) return;
+      const frames = ["思考中.", "思考中..", "思考中..."];
+      let i = 0;
+      think.textContent = frames[0];
+      thinkTimer = setInterval(() => {
+        i = (i + 1) % frames.length;
+        think.textContent = frames[i];
+      }, 400);
+      out.scrollTop = out.scrollHeight;
+    }
+    function sleep(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
+    async function typewrite(text) {
+      let shown = typed.textContent;
+      for (const ch of text) {
+        shown += ch;
+        typed.textContent = shown;
+        outCount.textContent = chars(shown) + " 字";
+        out.scrollTop = out.scrollHeight;
+        if (ch !== "\n") await sleep(CHAR_MS);
+      }
+      resultText = shown;
+    }
+    function wakePump() {
+      if (pumpWait) {
+        const goOn = pumpWait;
+        pumpWait = null;
+        goOn();
+      }
+    }
+    async function pump() {
+      if (typing) return;
+      typing = true;
+      try {
+        while (segQueue.length || !streamDone) {
+          if (!segQueue.length) {
+            showThink(true);
+            await new Promise((resolve) => { pumpWait = resolve; });
+            continue;
+          }
+          showThink(false);
+          const seg = segQueue.shift();
+          await typewrite(seg);
+          if (segQueue.length || !streamDone) {
+            showThink(true);
+            if (segQueue.length) await sleep(500);
+          }
+        }
+        showThink(false);
+      } finally {
+        typing = false;
+      }
+    }
+    function startPump() {
+      if (!pumpTask) pumpTask = pump().finally(() => { pumpTask = null; });
+      return pumpTask;
+    }
+    async function refreshStatus() {
+      try {
+        const r = await fetch("/api/status");
+        const j = await r.json();
+        foot.textContent = "权重 " + j.model + " · 目前只支持中文";
+      } catch (e) {
+        foot.textContent = "页面服务未连接";
+      }
+    }
+    async function rewrite() {
+      const text = src.value.trim();
+      if (!text) {
+        showError("请先贴入待改写段落。");
+        src.focus();
+        return;
+      }
+      showError("");
+      go.disabled = true;
+      segQueue = [];
+      streamDone = false;
+      typing = false;
+      setOut("", false);
+      out.classList.remove("empty");
+      showThink(true);
+      const t0 = Date.now();
+      hint.textContent = "思考中";
+      timer = setInterval(() => {
+        const s = Math.round((Date.now() - t0) / 1000);
+        hint.textContent = "思考中 · " + s + " 秒";
+      }, 500);
+      const task = startPump();
+      let failed = false;
+      try {
+        const r = await fetch("/api/rewrite", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text })
+        });
+        if (!r.ok || !r.body) {
+          let msg = "改写失败";
+          try { msg = (await r.json()).error || msg; } catch (e) {}
+          throw new Error(msg);
+        }
+        const reader = r.body.getReader();
+        const decoder = new TextDecoder();
+        let buf = "";
+        while (true) {
+          const step = await reader.read();
+          if (step.done) break;
+          buf += decoder.decode(step.value, { stream: true });
+          let cut;
+          while ((cut = buf.indexOf("\n\n")) >= 0) {
+            const block = buf.slice(0, cut);
+            buf = buf.slice(cut + 2);
+            const line = block.split("\n").find((x) => x.startsWith("data:"));
+            if (!line) continue;
+            const ev = JSON.parse(line.slice(5).trim());
+            if (ev.type === "error") throw new Error(ev.error || "改写失败");
+            if (ev.type === "segment" && ev.text) {
+              segQueue.push(ev.text);
+              wakePump();
+            }
+            if (ev.type === "done" && ev.text) resultText = ev.text;
+            if (ev.warning) showError(ev.warning);
+          }
+        }
+      } catch (e) {
+        failed = true;
+        showError(e.message || String(e));
+      } finally {
+        streamDone = true;
+        wakePump();
+        await task;
+        if (typed.textContent) resultText = typed.textContent;
+        else if (failed) setOut(PLACEHOLDER, true);
+        clearInterval(timer);
+        go.disabled = false;
+        hint.textContent = "Ctrl + Enter 开始";
+        refreshStatus();
+      }
+    }
+    go.addEventListener("click", rewrite);
+    document.getElementById("copy").addEventListener("click", async () => {
+      if (!resultText) return;
+      await navigator.clipboard.writeText(resultText);
+      hint.textContent = "已复制";
+      setTimeout(() => { hint.textContent = "Ctrl + Enter 开始"; }, 1200);
+    });
+    document.getElementById("clear").addEventListener("click", () => {
+      src.value = "";
+      srcCount.textContent = "0 字";
+      segQueue = [];
+      streamDone = true;
+      wakePump();
+      setOut(PLACEHOLDER, true);
+      showError("");
+      src.focus();
+    });
+    src.addEventListener("keydown", (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+        e.preventDefault();
+        rewrite();
+      }
+    });
+    refreshStatus();
+  </script>
+</body>
+</html>

@@ -1,0 +1,8 @@
+﻿**/.hf_token
+**/*.gguf
+**/__pycache__/
+*.log
+*.err
+.cache/
+.env
+.venv/
