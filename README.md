@@ -4,9 +4,6 @@
 
 目前只支持中文。
 
-> **更新一代：[Dailv](https://github.com/k856487/Dailv)**  
-> 改写质量更好、速度更快。工具已开源；模型需在 Hugging Face 申请访问后下载。
-
 ![Drop AIGC 页面](docs/preview.png)
 
 ## 模型
@@ -67,6 +64,11 @@ python app/server.py
 自行启动推理服务的示例（端口与设备按本机情况修改）：
 
 ```bash
-
 llama-server -m models/Dailv1.5-f16.gguf --host 127.0.0.1 --port 8080 -c 1024
 ```
+
+# 更新一代：Dailv
+
+改写质量更好、速度更快。工具已开源；模型需在 Hugging Face 申请访问后下载。
+
+https://github.com/k856487/Dailv
